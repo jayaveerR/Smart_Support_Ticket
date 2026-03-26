@@ -1,0 +1,154 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - name: string (required)
+    //   - email: string (required)
+    //   - phone: string (optional)
+    //   - department: string (optional)
+    //   - role: string (required) - 'user' or 'admin'
+    //   - createdAt: number (required) - JS Timestamp (ms)
+    //
+    // Collection: tickets
+    // Document ID: {auto-generated}
+    // Fields:
+    //   - ticketId: string (required) - Human-readable ID
+    //   - uid: string (optional) - UID of the creator
+    //   - name: string (required)
+    //   - email: string (required)
+    //   - subject: string (required)
+    //   - category: string (required)
+    //   - priority: string (required)
+    //   - description: string (required)
+    //   - status: string (required)
+    //   - createdAt: timestamp (required) - Firestore Server Timestamp
+    //   - timeline: list (required)
+    //   - location: map (optional)
+    //   - imageUrl: string (optional)
+    //   - dateOfMissing: string (optional)
+    //   - aiSummary: string (optional)
+    //   - adminComment: string (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "ramanadhamjayaveer@mictech.edu.in" && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'name', 'email', 'role', 'createdAt']) &&
+             hasOnlyAllowedFields(['uid', 'name', 'email', 'phone', 'department', 'role', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             isValidEmail(data.email) &&
+             data.role in ['user', 'admin'] &&
+             data.createdAt is number;
+    }
+
+    function isValidTicket(data) {
+      return hasRequiredFields(['ticketId', 'name', 'email', 'subject', 'category', 'priority', 'description', 'status', 'createdAt', 'timeline']) &&
+             hasOnlyAllowedFields(['ticketId', 'uid', 'name', 'email', 'subject', 'category', 'priority', 'description', 'status', 'createdAt', 'timeline', 'location', 'imageUrl', 'dateOfMissing', 'aiSummary', 'adminComment', 'type', 'id']) &&
+             data.ticketId is string && data.ticketId.size() > 0 && data.ticketId.size() < 50 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             isValidEmail(data.email) &&
+             data.subject is string && data.subject.size() > 0 && data.subject.size() < 200 &&
+             data.category is string && data.category.size() < 50 &&
+             data.priority is string && data.priority.size() < 20 &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 5000 &&
+             data.status in ['Open', 'In Progress', 'Resolved', 'Paused'] &&
+             data.timeline is list && data.timeline.size() < 50 &&
+             (data.createdAt is timestamp || data.createdAt == request.time);
+    }
+
+    function isValidMessage(data) {
+      return hasRequiredFields(['senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+             hasOnlyAllowedFields(['senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+             data.senderId == request.auth.uid &&
+             data.senderName is string && data.senderName.size() > 0 && data.senderName.size() < 100 &&
+             data.senderRole in ['user', 'admin'] &&
+             data.text is string && data.text.size() > 0 && data.text.size() < 2000 &&
+             data.createdAt is number;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == 'user' || isAdmin());
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated() && (request.auth.token.email == "ramanadhamjayaveer@mictech.edu.in" || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    match /tickets/{ticketDocId} {
+      // Public creation
+      allow create: if isValidTicket(request.resource.data);
+      
+      // Admin can list all
+      // Users can list their own if they are logged in
+      // Guest tracking via ticketId query is allowed
+      allow list: if isAdmin() || 
+                   (isAuthenticated() && resource.data.email == request.auth.token.email) ||
+                   (request.query.limit <= 5);
+      
+      // Get access for tracking
+      allow get: if true;
+      
+      // Admin only updates
+      allow update: if isAdmin() && isValidTicket(request.resource.data);
+      
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isAdmin() || (isAuthenticated() && get(/databases/$(database)/documents/tickets/$(ticketDocId)).data.email == request.auth.token.email);
+        allow create: if (isAdmin() || (isAuthenticated() && get(/databases/$(database)/documents/tickets/$(ticketDocId)).data.email == request.auth.token.email)) && isValidMessage(request.resource.data);
+      }
+    }
+  }
+}

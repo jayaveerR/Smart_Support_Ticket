@@ -1,0 +1,26 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-n8n: #FF6C37;
+  --color-n8n-dark: #1A1A1A;
+  --color-pink-primary: #FF1493;
+  --color-pink-soft: #FFF0F5;
+}
+
+body {
+  @apply bg-white text-black font-sans antialiased;
+}
+
+.pink-content {
+  @apply text-pink-primary;
+}
+
+.n8n-bg {
+  @apply bg-n8n text-white;
+}
+
+.pink-bg {
+  @apply bg-pink-primary text-white;
+}

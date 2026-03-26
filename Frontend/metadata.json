@@ -1,0 +1,5 @@
+{
+  "name": "SmartSupport AI",
+  "description": "Advanced Customer Support & Case Management System with real-time tracking and n8n automation.",
+  "requestFramePermissions": ["geolocation"]
+}
